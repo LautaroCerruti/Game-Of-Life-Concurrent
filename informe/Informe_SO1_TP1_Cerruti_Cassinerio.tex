@@ -1,0 +1,162 @@
+\documentclass[]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[a4paper]{geometry}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{mystyle}{
+	backgroundcolor=\color{backcolour},   
+	commentstyle=\color{codegreen},
+	keywordstyle=\color{magenta},
+	numberstyle=\tiny\color{codegray},
+	stringstyle=\color{codepurple},
+	basicstyle=\ttfamily\footnotesize,
+	breakatwhitespace=false,         
+	breaklines=true,                 
+	captionpos=b,                    
+	keepspaces=true,                    
+	numbersep=5pt,                  
+	showspaces=false,                
+	showstringspaces=false,
+	showtabs=false,                  
+	tabsize=2,
+	framexleftmargin=5mm, frame=shadowbox, rulesepcolor=\color{gray}
+}
+
+\lstset{style=mystyle}
+%opening
+\begin{document}
+	
+\title{TP Juego de la Vida de Conway}
+\author{Cassinerio Marcos - Cerruti Lautaro}
+\date{Abril 19, 2021\footnote{Updated \today}}
+\maketitle
+\newpage
+
+\section{Introducción}
+El objetivo de este trabajo fue implementar un simulador del Juego de la Vida
+de Conway que funcionara de forma concurrente.
+
+\section{Compilado y ejecución}
+Para compilar el proyecto abrimos una terminal, y una vez ubicados en el directorio del proyecto, ejecutamos el comando \verb|make|. Esto nos generará el ejecutable del simulador.\\\\
+El mismo lo corremos con: 
+
+\verb|./simulador FilePath/Nombre.game|
+
+\section{Organizacion de los archivos}
+El programa se divide en 4 partes: Board, Barrier, Game y Simulador\\
+Por un lado tenemos la implementación y declaración de Board en los archivos \verb|board.c| y \verb|board.h| respectivamente.\\
+Por otro lado tenemos Barrier hecho de la misma manera, en los archivos \verb|barrier.c| y \verb|barrier.h|.\\
+Luego tenemos al Game que hace uso de las dependecias board y barrier. Su implementación y declaración se encuentra en los archivos \verb|game.c| y \verb|game.h|.\\
+Finalmente tenemos en el archivo \verb|simulador.c| que hace uso de Game para poder correr el juego.
+\newpage
+\section{Implementaciones y estructuras}
+\subsection{Board}
+La implementación de Board esta basado en un array bidimensional de chars, definido de la siguiente manera:
+
+\begin{lstlisting}[language=C]
+struct _board {
+	char** cell;
+	unsigned int col;
+	unsigned int row;
+};
+
+typedef struct _board board_t;
+\end{lstlisting}
+En su cabecera declaramos las funciones:
+
+\verb|board_init|
+
+\verb|board_get|
+
+\verb|board_get_round|
+
+\verb|board_set|
+
+\verb|board_load_row|
+
+\verb|board_show|
+
+\verb|board_destroy|
+\\\\
+La función \verb|board_get| nunca es utilizada, pero para que la implentación sea general se vio la necesidad de hacerla.\\
+Todas las implementaciones se encuentran en \verb|board.c|.
+\subsection{Barrier}
+La declaración de la barrier es la siguiente:
+
+\begin{lstlisting}[language=C]
+struct cond_barrier {
+	unsigned int count;
+	unsigned int waiting;
+	pthread_mutex_t mutex;
+	pthread_cond_t cond;
+};
+
+typedef struct cond_barrier barrier_t;
+\end{lstlisting}
+En su cabecera declaramos las siguientes funciones:
+
+\verb|barrier_init|
+
+\verb|barrier_wait|
+
+\verb|barrier_destroy|\\\\
+Sus implentaciones se encuentran en \verb|barrier.c|, junto con la implementacion de la funcion:
+
+\verb|digits_of_int|
+
+\newpage
+\subsection{Game}
+El Game se encuentra definido de la siguiente manera:
+
+\begin{lstlisting}[language=C]
+struct _game {
+	unsigned int cycles;
+	board_t *board;
+};
+
+typedef struct _game game_t;
+\end{lstlisting}
+En su archivo cabecera se encuentran declaradas las siguientes funciones:
+
+\verb|loadGame|
+
+\verb|writeBoard|
+
+\verb|conwayGoL|
+
+\verb|destroyGame|
+\\
+Sus implementaciones se encuentran en el archivo \verb|game.c|, junto con las implementaciones de las funciones:
+
+\verb|distribute|
+
+\verb|getNextState|
+
+\verb|threadFoo|
+
+\subsection{Simulador}
+En el simulador se encuentra el main del programa, este se encarga de ejecutar las funciones de Game.
+
+\newpage
+\section{Desarrollo y complicaciones}
+Comenzamos implementando el board mientras pensabamos ideas de como implementar la concurrencia. Luego de implementarlo con barriers para sincronizar todos los threads al finalizar la escritura, comenzamos a notar algunos problemas y errores.\\
+Uno de estos errores fue que en el manual de \verb|pthread_cond_wait| dice que hace un unlock del mutex que se le pasa por parámetro, sin embargo debuggueando notamos que no lo estaba haciendo, provocando que todos los otros threads esperaran a que este lo soltara pero el thread que lo había lockeado estaba dormido, lo que resultaba en deadlock.\\
+En barrier se nos presento otra complicación que fue por un error nuestro, cuando era el último thread en llegar, hacía el unlock del mutex antes de poner el contador de waiting en 0. Esto provocaba que los threads que estaban esperando el mutex se fueran a dormir antes de haber reiniciado el contador, y luego el thread lo reiniciaba a 0 cuando en realidad ya había threads durmiendo, provocando que en un momento todos se fueran a dormir y el programa quedara en deadlock.\\
+Otra complicación que se nos presentó fue que al pasar los argumentos a cada thread estabamos usando una referencia a la misma variable de estructura de argumentos con una de sus variables cambiada en cada iteración. Esto causo que en diferentes threads se tuviera el mismo valor en dicha variable, calculando erroneamente el tablero.\\
+
+Una de las decisiones de desarrollo que consideramos importante mencionar es la de implementar una funcion \verb|distribute| para optimizar las divisiones del tablero entre los threads. Ya que en un principio pensamos en hacer divisiones solamente por rows, pero nos dimos cuenta que en un caso como cuando tenemos un tablero de 3 filas por 20 columnas y 4 unidades de procesamiento, no estariamos aprovechando una de esas unidades. Entonces implementamos la funciónantes mencionada que basandose en la cantidad de filas y columnas, dividiera el tablero de la mejor forma posible.\\
+
+
+\newpage
+\section{Bibliografia}
+\url{https://es.wikipedia.org/wiki/Juego_de_la_vida}\\
+\url{https://pubs.opengroup.org/onlinepubs/7908799/xsh/pthread_cond_wait.html}\\
+\end{document}
